@@ -19,3 +19,5 @@ third_party
 speed_logs
 pred
 pred_e
+# my addition
+.venv/
