@@ -3,32 +3,46 @@ import warnings
 warnings.filterwarnings("ignore")
 import torch
 import random
-from models.llama_kivi import LlamaForCausalLM_KIVI
-from transformers import LlamaConfig, AutoTokenizer
+# from models.llama_kivi import LlamaForCausalLM_KIVI
+# from transformers import LlamaConfig, AutoTokenizer
+from models.mistral_kivi import MistralForCausalLM_KIVI
+from transformers import MistralConfig, AutoTokenizer
 from datasets import load_dataset
 
 # For reproducibility
 random.seed(0)
 torch.manual_seed(0)
-
-config = LlamaConfig.from_pretrained("meta-llama/Llama-3.1-8B-Instruct")
+MODEL_ID="mistralai/Mistral-7B-Instruct-v0.2"
+config = MistralConfig.from_pretrained(MODEL_ID)
+# config = LlamaConfig.from_pretrained("meta-llama/Llama-3.1-8B-Instruct")
 
 config.k_bits = 2 # KiVi currently support 2/4 K/V bits
 config.v_bits = 2
 config.group_size = 32 
 config.residual_length = 32 # corresponding to the number of recent fp16 tokens
-config.use_flash = True
+config.use_flash = False
 
-model = LlamaForCausalLM_KIVI.from_pretrained(
+# model = LlamaForCausalLM_KIVI.from_pretrained(
+#     # pretrained_model_name_or_path='meta-llama/Llama-2-7b-hf',
+#     pretrained_model_name_or_path='meta-llama/Llama-3.1-8B-Instruct',
+#     config=config,
+#     low_cpu_mem_usage=True,
+#     torch_dtype=torch.float16,
+#     load_in_8bit=True,
+# ).cuda()
+model = MistralForCausalLM_KIVI.from_pretrained(
     # pretrained_model_name_or_path='meta-llama/Llama-2-7b-hf',
-    pretrained_model_name_or_path='meta-llama/Llama-3.1-8B-Instruct',
+    pretrained_model_name_or_path=MODEL_ID,
     config=config,
     low_cpu_mem_usage=True,
     torch_dtype=torch.float16,
-).cuda()
+    load_in_8bit=True,
+    device_map="auto"
+)
 
 enc = AutoTokenizer.from_pretrained(
-    'meta-llama/Llama-3.1-8B-Instruct', 
+    MODEL_ID, 
+
     use_fast=False, 
     trust_remote_code=True)
 

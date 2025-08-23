@@ -21,3 +21,5 @@ pred
 pred_e
 # my addition
 .venv/
+.continue/
+my_test/
