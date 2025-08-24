@@ -8,7 +8,7 @@ import math
 import os
 import triton
 from new_pack import quant_and_pack_vcache, unpack_and_dequant_kcache, triton_quantize_and_pack_along_last_dim, unpack_and_dequant_vcache, quant_and_pack_kcache
-from matmul import triton_bmm_fA_qB_outer
+# from matmul import triton_bmm_fA_qB_outer
 from timeit_v2 import py_benchmark
 
 
@@ -204,8 +204,8 @@ def test_4d_qmatmul():
 
 if __name__ == '__main__':
 	set_seed(114514)
-	# test_kcache()
+	test_kcache()
 	# test_vcache()
 	# test_4d_qmatmul()
 	# test_streaming_kvcache()
-	test_bmm_speed()
+	# test_bmm_speed()

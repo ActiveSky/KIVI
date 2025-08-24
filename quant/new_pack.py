@@ -4,7 +4,8 @@ import random
 import numpy as np
 import torch
 
-
+#=================== Quantize ===================
+#K cache quantization
 def quant_and_pack_kcache(k: torch.FloatTensor, group_size: int, bits: int):
 	assert len(k.shape) == 4
 	shape = k.shape
@@ -26,7 +27,7 @@ def quant_and_pack_kcache(k: torch.FloatTensor, group_size: int, bits: int):
 	code = pack_tensor(data, bits, pack_dim=2)
 	return code, scale, mn
 
-
+#V cache quantization
 def quant_and_pack_vcache(v: torch.FloatTensor, group_size: int, bits: int):
 	shape = v.shape
 	assert len(shape) == 4
@@ -47,7 +48,7 @@ def quant_and_pack_vcache(v: torch.FloatTensor, group_size: int, bits: int):
 	code = pack_tensor(data, bits, pack_dim=3)
 	return code, scale, mn
 
-
+#=================== Dequantize ===================
 def unpack_and_dequant_kcache(k_code: torch.FloatTensor, 
 							  scale: torch.FloatTensor, 
 							  mn: torch.FloatTensor,
@@ -82,7 +83,7 @@ def unpack_and_dequant_vcache(v_code: torch.FloatTensor,
 	data = data * scale + mn 
 	return data.view(shape)
 
-
+#=================== Pack ===================
 def pack_tensor(data, bits, pack_dim):
 	# Pack
 	shape = data.shape
@@ -106,7 +107,7 @@ def pack_tensor(data, bits, pack_dim):
 		row += 1
 	return code
 
-
+#=================== Unpack ===================
 def unpack_tensor(v_code: torch.FloatTensor, 
 				  bits: int, 
 				  pack_dim: int):
