@@ -1,4 +1,4 @@
-# torch==2.1.2
+torch==2.4.1
 packaging==24.0
 absl-py==2.0.0
 accelerate==0.25.0
