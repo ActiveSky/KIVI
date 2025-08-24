@@ -3,7 +3,7 @@ import json
 import argparse
 import numpy as np
 
-from metrics import (
+from utils.metrics import (
     qa_f1_score,
     rouge_zh_score,
     qa_f1_zh_score,
