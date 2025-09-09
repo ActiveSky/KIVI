@@ -216,6 +216,23 @@ def _minmax_along_last_dim(
 	
 
 def triton_quantize_and_pack_along_last_dim(data: torch.Tensor, group_size: int, bit: int):
+	"""
+	对4D张量沿最后一个维度进行量化和打包操作，使用Triton进行GPU加速优化。
+	
+	该函数是KIVI量化框架的核心组件，主要用于KV cache的量化和压缩，
+	支持2-bit、4-bit、8-bit量化，通过分组量化和位打包技术显著减少显存占用。
+	
+	Args:
+		data: 输入的4D张量，形状为(B, nh, D, T)
+		group_size: 分组大小，用于分组量化
+		bit: 量化位数，支持2、4、8位
+		
+	Returns:
+		code: 打包后的量化数据，形状为(B, nh, D, T//feat_per_int)
+		scale: 每组的缩放因子，形状为(B, nh, D, num_groups)
+		mn: 每组的最小值，形状为(B, nh, D, num_groups)
+	"""
+	# 1. 输入验证和形状处理
 	assert len(data.shape) == 4
 	shape = data.shape
 	B, nh, D, T = shape
@@ -224,31 +241,54 @@ def triton_quantize_and_pack_along_last_dim(data: torch.Tensor, group_size: int,
 	num_groups = T // group_size
 	new_shape = (B * nh * D, num_groups, group_size)
 	scale_mn_shape = B, nh, D, num_groups
-	# Quantize
+	
+	# 2. 重塑数据为分组量化格式
+	# 将数据重塑为(B*nh*D, num_groups, group_size)以便进行分组量化
 	data = data.reshape(new_shape)
+	
+	# 3. 使用Triton内核并行计算每组的最小值和最大值
+	# 预分配内存存储最值，避免动态内存分配开销
 	mx = torch.empty((B * nh * D, num_groups), device=data.device, dtype=data.dtype)
 	mn = torch.empty((B * nh * D, num_groups), device=data.device, dtype=data.dtype)
 	BLOCK_SIZE_N = 128
+	# 配置网格：基于数据总量和块大小
 	grid = lambda meta: (triton.cdiv(data.shape[0]*data.shape[1], BLOCK_SIZE_N),)
 	with torch.cuda.device(data.device):
+		# 调用Triton内核并行计算最值，使用8个warp最大化SM利用率
 		_minmax_along_last_dim[grid](data, mn, mx,
 							 data.numel(), data.shape[0], num_groups, group_size,
 							 BLOCK_SIZE_N=BLOCK_SIZE_N, num_warps=8) 
-	# mn = torch.min(data, dim=-1, keepdim=True)[0].squeeze(-1)
-	# mx = torch.max(data, dim=-1, keepdim=True)[0].squeeze(-1)
+	
+	# 4. 量化过程
+	# 计算缩放因子：(max - min) / (2^bit - 1)
 	scale = (mx - mn) / (2 ** bit - 1)
+	# 减去最小值进行零点偏移
 	data = data - mn.unsqueeze(-1)
+	# 应用缩放因子进行归一化
 	data.div_(scale.unsqueeze(-1))
+	# 限制在[0, 2^bit-1]范围内并取整，转换为int32
 	data = data.clamp_(0, 2 ** bit - 1).round_().to(torch.int32)
+	
+	# 5. 位打包操作
+	# 重塑数据为2D张量以便打包操作
 	data = data.view(-1, T)
+	# 计算每个32位整数能存储的特征数（例如：2-bit时为16个）
 	feat_per_int = 32 // bit
+	# 创建打包后的张量形状
 	packshape = (np.prod(shape[:-1]), shape[-1] // feat_per_int,)
+	# 预分配打包后的张量
 	code = torch.zeros(*packshape, device=data.device, dtype=torch.int32)
+	# 配置打包网格
 	grid = lambda meta: (triton.cdiv(data.shape[0], BLOCK_SIZE_N), data.shape[1] // feat_per_int,)
 	with torch.cuda.device(data.device):
+		# 调用Triton内核进行位打包，将多个低位值打包到单个32位整数中
 		_pack_along_last_dim[grid](bit, data, code, data.shape[0], 
 								data.shape[1], feat_per_int, 
 								BLOCK_SIZE_N=BLOCK_SIZE_N, 
 								num_warps=8)
+	
+	# 6. 返回打包后的数据和量化参数
+	# 将打包后的数据重塑为原始4D形状（除了最后一个维度）
+	# 返回缩放因子和最小值用于后续反量化
 	return code.view(B, nh, D, -1), scale.reshape(scale_mn_shape), mn.reshape(scale_mn_shape)
 	
