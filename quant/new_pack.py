@@ -158,64 +158,34 @@ def _pack_along_last_dim(
 
 @triton.jit
 def _minmax_along_last_dim(
-	x_ptr,
-	mn_ptr, mx_ptr,
-	total_elements: tl.constexpr, 
-	N: tl.constexpr,
-	num_groups: tl.constexpr, 
-	group_size: tl.constexpr,
-	BLOCK_SIZE_N: tl.constexpr
+	x_ptr,        # 输入数据x的指针，指向需要计算最小值和最大值的数据
+	mn_ptr, mx_ptr,  # 分别指向存储最小值和最大结果的指针
+	total_elements: tl.constexpr,   # 输入数据中的总元素数量，编译时常量
+	N: tl.constexpr,  # 组数，编译时常量
+	num_groups: tl.constexpr,   # 分组数量，编译时常量
+	group_size: tl.constexpr,  # 每组的大小，编译时常量
+	BLOCK_SIZE_N: tl.constexpr  # 块大小N，编译时常量
 ):
-	bid = tl.program_id(axis=0)
-	offsets_b = bid * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+	bid = tl.program_id(axis=0)  # 获取当前程序在axis=0维度上的ID
+	offsets_b = bid * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)  # 计算在B维度上的偏移量
+	# 计算在数据中的总偏移量，使用广播机制生成二维偏移量数组
 	offsets = offsets_b[:, None] * group_size + tl.arange(0, group_size)[None, :]
+	# 创建掩码，确保偏移量不超过总元素数量
 	mask = offsets < total_elements
+	# 根据偏移量和掩码加载数据
 	x = tl.load(x_ptr + offsets, mask=mask)
+	# 沿着最后一个维度计算每组的最大值
 	mx_val = tl.max(x, axis=1)
+	# 沿着最后一个维度计算每组的最小值
 	mn_val = tl.min(x, axis=1)
 	# tl.device_print('shape', mn_val[:, None].shape)
 	tl.store(mn_ptr+offsets_b, mn_val, mask=offsets_b<N*num_groups)
 	tl.store(mx_ptr+offsets_b, mx_val, mask=offsets_b<N*num_groups)
 
 
-# def triton_quantize_and_pack_along_last_dim(data: torch.Tensor, group_size: int, bit: int):
-# 	assert len(data.shape) == 4
-# 	shape = data.shape
-# 	B, nh, D, T = shape
-# 	# ================== Get Scale & Zeros ===============
-# 	assert T % group_size == 0
-# 	num_groups = T // group_size
-# 	new_shape = (B * nh * D, num_groups, group_size)
-# 	scale_mn_shape = B, nh, D, num_groups
-# 	# Quantize
-# 	max_int = 2 ** bit - 1
-# 	data = data.view(new_shape)
-# 	mn = torch.min(data, dim=-1, keepdim=True)[0]
-# 	mx = torch.max(data, dim=-1, keepdim=True)[0]
-# 	# B, nh, D, T // group_size, 1
-# 	scale = (mx - mn) / max_int
-# 	data = data - mn
-# 	data.div_(scale)
-# 	data = data.clamp_(0, max_int).round_().to(torch.int32)
-# 	scale, mn = scale.squeeze(-1), mn.squeeze(-1)
-# 	data = data.view(-1, T)
-# 	feat_per_int = 32 // bit
-# 	packshape = (np.prod(shape[:-1]), shape[-1] // feat_per_int,)
-# 	code = torch.zeros(*packshape, device=data.device, dtype=torch.int32)
-# 	if B <= 4:
-# 		BLOCK_SIZE_N = 32
-# 	else:
-# 		BLOCK_SIZE_N = 128
-# 	grid = lambda meta: (triton.cdiv(data.shape[0], BLOCK_SIZE_N), data.shape[1] // feat_per_int,)
-# 	_pack_along_last_dim[grid](bit, data, code, data.shape[0], 
-# 								data.shape[1], feat_per_int, 
-# 								BLOCK_SIZE_N=BLOCK_SIZE_N, 
-# 								num_warps=8)
-# 	return code.view(B, nh, D, -1), scale.view(scale_mn_shape), mn.view(scale_mn_shape)
-	
-	
 
 def triton_quantize_and_pack_along_last_dim(data: torch.Tensor, group_size: int, bit: int):
+<<<<<<< HEAD
 	"""
 	对4D张量沿最后一个维度进行量化和打包操作，使用Triton进行GPU加速优化。
 	
@@ -248,6 +218,18 @@ def triton_quantize_and_pack_along_last_dim(data: torch.Tensor, group_size: int,
 	
 	# 3. 使用Triton内核并行计算每组的最小值和最大值
 	# 预分配内存存储最值，避免动态内存分配开销
+=======
+	assert len(data.shape) == 4 #确保是4维张量
+	shape = data.shape
+	B, nh, D, T = shape
+	# ================== Get Scale & Zeros ===============
+	assert T % group_size == 0 #确保要量化的张量长度是group_size的整数倍
+	num_groups = T // group_size # 计算分组数量
+	new_shape = (B * nh * D, num_groups, group_size) # data要重新调整的新张量形状
+	scale_mn_shape = B, nh, D, num_groups # scale和mn张量的形状
+	# Quantize
+	data = data.reshape(new_shape) # 调整data的形状
+>>>>>>> a1570ef (docs: add Chinese comments to quantization functions)
 	mx = torch.empty((B * nh * D, num_groups), device=data.device, dtype=data.dtype)
 	mn = torch.empty((B * nh * D, num_groups), device=data.device, dtype=data.dtype)
 	BLOCK_SIZE_N = 128
@@ -257,12 +239,20 @@ def triton_quantize_and_pack_along_last_dim(data: torch.Tensor, group_size: int,
 		# 调用Triton内核并行计算最值，使用8个warp最大化SM利用率
 		_minmax_along_last_dim[grid](data, mn, mx,
 							 data.numel(), data.shape[0], num_groups, group_size,
+<<<<<<< HEAD
 							 BLOCK_SIZE_N=BLOCK_SIZE_N, num_warps=8) 
 	
 	# 4. 量化过程
 	# 计算缩放因子：(max - min) / (2^bit - 1)
 	scale = (mx - mn) / (2 ** bit - 1)
 	# 减去最小值进行零点偏移
+=======
+							 BLOCK_SIZE_N=BLOCK_SIZE_N, num_warps=8) #并行计算每组的最小值和最大值
+	# mn = torch.min(data, dim=-1, keepdim=True)[0].squeeze(-1)
+	# mx = torch.max(data, dim=-1, keepdim=True)[0].squeeze(-1)
+	#量化的核心步骤
+	scale = (mx - mn) / (2 ** bit - 1) #计算缩放因子
+>>>>>>> a1570ef (docs: add Chinese comments to quantization functions)
 	data = data - mn.unsqueeze(-1)
 	# 应用缩放因子进行归一化
 	data.div_(scale.unsqueeze(-1))

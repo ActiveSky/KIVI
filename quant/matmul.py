@@ -8,17 +8,17 @@ import kivi_gemv
 
 @triton.jit
 def qbvm_kernel(
-	bits,
-	a_ptr, b_ptr, c_ptr,
-	scales_ptr, zeros_ptr,
-	M, N, K,
-	stride_abatch, stride_am, stride_ak,
-	stride_bbatch, stride_bk, stride_bn,
-	stride_cbatch, stride_cm, stride_cn,
-	stride_scales_b, stride_scales_k, stride_scales_g,
-	stride_zeros_b, stride_zeros_k, stride_zeros_g,
+	bits,  # 每个量化比特数，指定量化精度
+	a_ptr, b_ptr, c_ptr,  # 输入矩阵A、B和输出矩阵C的指针
+	scales_ptr, zeros_ptr,  # 量化缩放因子和零点的指针
+	M, N, K,  # 矩阵维度：A为(B,1,K)，B为(B,K,N)，C为(B,1,N)
+	stride_abatch, stride_am, stride_ak,  # 矩阵A的步长
+	stride_bbatch, stride_bk, stride_bn,  # 矩阵B的步长
+	stride_cbatch, stride_cm, stride_cn,  # 矩阵C的步长
+	stride_scales_b, stride_scales_k, stride_scales_g,  # 缩放因子的步长
+	stride_zeros_b, stride_zeros_k, stride_zeros_g,  # 零点的步长
 	groupsize,
-	BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
+	BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,  # 块大小，编译时常量
 ):
 	"""
 	Compute the batch matrix multiplication C = A x B.
@@ -94,18 +94,30 @@ def qbvm_kernel(
 
 
 def understand_code():
-	M, N, K = 512, 256, 256
-	BLOCK_SIZE_M, BLOCK_SIZE_N, GROUP_SIZE_M = 64, 64, 4
+
+    # 定义矩阵和块的尺寸参数
+	M, N, K = 512, 256, 256  # M, N, K 表示矩阵的维度
+	BLOCK_SIZE_M, BLOCK_SIZE_N, GROUP_SIZE_M = 64, 64, 4  # 定义块大小和组大小
+    # 计算总程序ID数量，即需要执行的程序总数
 	total_program_id = triton.cdiv(M, BLOCK_SIZE_M) * triton.cdiv(N, BLOCK_SIZE_N)
+    # 遍历所有程序ID
 	for pid in range(0, total_program_id):
+        # 计算M方向和N方向的程序ID数量
 		num_pid_m = triton.cdiv(M, BLOCK_SIZE_M)
 		num_pid_n = triton.cdiv(N, BLOCK_SIZE_N)
+        # 计算每个组中的程序ID数量
 		num_pid_in_group = GROUP_SIZE_M * num_pid_n
+        # 计算当前程序所属的组ID
 		group_id = pid // num_pid_in_group
+        # 计算组中第一个程序在M方向的ID
 		first_pid_m = group_id * GROUP_SIZE_M
+        # 计算当前组在M方向的实际大小
 		group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
+        # 计算当前程序在M方向的ID
 		pid_m = first_pid_m + (pid % group_size_m)
+        # 计算当前程序在N方向的ID
 		pid_n = (pid % num_pid_in_group) // group_size_m
+        # 打印当前程序ID及其在M和N方向的坐标
 		print(f"pid={pid}, pid_m={pid_m}, pid_n={pid_n}")
 	
 
@@ -195,9 +207,13 @@ def cuda_bmm_fA_qB_outer(group_size: int,
 
 	Returns C of shape (B, nh, M, N) float16
 	"""    
+	# 检查输入张量的维度是否为4
 	assert len(fA.shape) == 4 and len(qB.shape) == 4
+	# 获取fA张量的维度信息
 	B, nh, M, K = fA.shape 
+	# 获取qB张量的第二个维度（nh_kv）
 	nh_kv =  qB.shape[1]
+	# 计算每个整数可以存储的特征数量（根据位数）
 	feat_per_int = 32 // bits
 	# flatten to a 3D tensor
 	fA = fA.view(-1, M, K).contiguous()
